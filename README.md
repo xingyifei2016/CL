@@ -1,1 +1,3 @@
-# A Basic implementation of incremental learning baselines
+# A basic implementation of incremental learning baselines
+
+## Training on tiny imagenet
