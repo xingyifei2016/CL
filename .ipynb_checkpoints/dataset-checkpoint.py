@@ -3,14 +3,25 @@ from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
 import subprocess
 import torch
-
-
+import torchvision
+from torchvision import transforms
+import tqdm
 from pdb import set_trace as st
+from torch.utils.data import Subset
+from sklearn.model_selection import train_test_split
 
 path = os.path.join('./dataset/', 'tiny-imagenet-200')
 
-# Function to create directory
+def train_val_dataset(dataset, val_split=0.2):
+    train_idx, val_idx = train_test_split(list(range(len(dataset))), test_size=val_split)
+    datasets = {}
+    datasets['train'] = Subset(dataset, train_idx)
+    datasets['val'] = Subset(dataset, val_idx)
+    return datasets
+
 def create_dir(dirpath, print_description=""):
+    # Function to create directory
+    # Checks if path exists
     try:
         if not os.path.exists(dirpath):
             os.makedirs(dirpath, mode=0o750)
@@ -41,7 +52,8 @@ class tinyImageNet(torchvision.datasets.ImageFolder):
     # Modifies the find_classes function from torch's Dataset class
     # Remember in defying paper, train is split 80:20 to train/val; val is for testing
     def __init__(self, root="/root/yifei/CL_mod/src/dataset/tiny-imagenet-200/tiny-imagenet-200/train", 
-                 transform=None, target_transform=None, subset=None):
+                 transform=transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),]), 
+                 target_transform=None, subset=None):
         # Subset stores a dictionary of class names to its label
         self.subset = subset
         super().__init__(root=root, transform=transform, target_transform=target_transform)
@@ -60,7 +72,7 @@ def create_tasks(num_tasks=10, path="/root/yifei/CL_mod/src/dataset/tiny-imagene
     # a dictionary that maps class_labels to class_id (ie 0)
      
     # Get the file path that stores the class names
-    file_path = os.path.join(root_path, "wnids.txt")
+    file_path = os.path.join(path, "wnids.txt")
     
     # Get the class names as a list
     lines = [line.rstrip('\n') for line in open(file_path)]
@@ -80,13 +92,65 @@ def create_tasks(num_tasks=10, path="/root/yifei/CL_mod/src/dataset/tiny-imagene
             task_dict[lines[j]] = current_id
             current_id += 1
         outputs.append(task_dict) 
-    return outputs
- 
+    return outputs 
+
+def file_reading_func(root="/root/yifei/CL_mod/src/dataset/tiny-imagenet-200/tiny-imagenet-200/val/val_annotations.txt"):
+    # Reads an annotation file and sorts it in the form of dictionary
+    # file_name -> classname 
+    f = open(root, "r")
+    out_dict = {}
+    for x in f:
+        cur_line = x.rstrip('\n').split('\t')
+        out_dict[cur_line[0]] = cur_line[1]
+    return out_dict
+
+def traverse(root):
+    # Helper function prints whatever is in this root
+    for path, currentDirectory, files in os.walk(root):
+        for file in files:
+            print(os.path.join(path, file))
+    
+        
+def reorganize_files(new_root="/root/yifei/CL_mod/src/dataset/tiny-imagenet-200/tiny-imagenet-200/new_test", 
+                     old_root="/root/yifei/CL_mod/src/dataset/tiny-imagenet-200/tiny-imagenet-200/val", 
+                     file_reading_func=file_reading_func):
+    # Function that creates a new folder for imgfolder format, used for test set in tiny imageNet
+    # new_root should be an empty path where the new folder is created
+    # old_root is where the annotated txt file and the images are stored
+    # file_reading_func processes
+    # val/classname/*.jpeg
+    # To save space, does not copy but moves the files 
+    # Creates new images in the format *class_name*_*sample_number*.JPEG
+    ann_root = os.path.join(old_root, "val_annotations.txt")
+    file_dict = file_reading_func(ann_root)
+    create_dir(new_root)
+    file_count = {}
+    for path, currentDirectory, files in os.walk(old_root):
+        for file in files:
+            if file.split(".")[-1] == "JPEG":
+                # Only move JPEG
+                current_path = os.path.join(path, file)
+                class_name = file_dict[file]
+                try:
+                    current_count = file_count[class_name]
+                except:
+                    file_count[class_name] = 0
+                    current_count = 0
+                    create_dir(os.path.join(new_root, class_name))
+                new_path = os.path.join(new_root, class_name)
+                new_img_name = str(class_name)+"_"+str(current_count)+".JPEG"
+                new_img_path = os.path.join(new_path, new_img_name)
+                file_count[class_name] += 1
+                shutil.move(current_path, new_img_path)
+    print("Finished processing all images")
+            
+            
+            
     
 
-
-        
-        
+    
+    
+    
     
     
     

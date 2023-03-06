@@ -1,0 +1,4 @@
+23-03-04 19:32:11 [608445] INFO base: args: Namespace(bs=256, checkpoint_dir='./ckpt/', deterministic=False, dset_path='/root/yifei/CL_mod/src/dataset/tiny-imagenet-200/tiny-imagenet-200/', epoch_per_task=5, lr=0.001, note=None, num_tasks=10, seed=0, wd=0)
+23-03-04 19:32:11 [608445] INFO base: system command: main.py
+23-03-04 19:32:12 [608445] INFO base: # Params: 11689512
+23-03-04 19:32:12 [608445] INFO base: Validating....
