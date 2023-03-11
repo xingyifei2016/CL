@@ -40,33 +40,48 @@ def setup_logger(LOG, checkpoint_dir, debug=True):
 
 
 class Model_Tracker:
+    # Model writer for class incremental models
+    
     def __init__(self, path, LOG):
-        self.path = path
-        self.name = None
-        self.best_acc = 0
+        """
+        the files will be saved in the form of parent_dir / task_id / model.ckpt
+        each model saved at the particular task_id will be the one with highest validation accuracy 
+        
+        path is the parent directory which the models should be saved
+        LOG is the logger that will produce
+        tasks is a dictionary which maps task_number to the tuple containing currently saved file name and validation accuracy
+        ie. {task_number: (file_name, validation_accuracy)}
+        """
+        self.ckpt_dir = path
         self.LOG = LOG
+        self.tasks = {}
 
-        if self.path[-1] != '/':
-            self.path = self.path+'/'
+        if self.ckpt_dir[-1] != '/':
+            self.ckpt_dir = self.ckpt_dir+'/'
 
-    def remove_old_save(self):
-        if self.name:
-            self.LOG.info("Removing Old Model Checkpoint at " +
-                          self.path+self.name)
-            os.remove(os.path.join(self.path, self.name))
+    def remove_old_save(self, task_number):
+        if task_number in self.tasks.key():
+            task_model_path = os.path.join(os.path.join(self.ckpt_dir, str(task_number)), self.tasks[task_number][0])
+            self.LOG.info("Removing Old Model Checkpoint at " + task_model_path)
+            os.remove(task_model_path)
 
-    def create_new_save(self, name, net):
-        self.LOG.info("New Best Validation Accuracy: "+str(self.best_acc))
+    def create_new_save(self, name, net, task_number):
+        self.LOG.info("Saving New Best Validation Accuracy: "+str(self.best_acc))
+        task_model_path = os.path.join(os.path.join(self.ckpt_dir, str(task_number)), name)
+        self.tasks[task_number][1] = name
         self.remove_old_save()
-        self.name = name
-        self.LOG.info("Creating New Model Checkpoint at " +
-                      os.path.join(self.path, self.name))
-        torch.save(net, os.path.join(self.path, self.name))
+        self.LOG.info("Creating New Model Checkpoint at " + str(task_model_path))
+        torch.save(net, task_model_path)
 
-    def update(self, new_acc):
-        better = new_acc > self.best_acc
+    def update(self, new_acc, task_number):
+        if task_number not in self.tasks:
+            old_acc = 0
+            self.tasks[task_number] = (0, "No_model.pth")
+        else:
+            old_acc = self.tasks[task_number][1]
+        better = new_acc > old_acc
         if better:
-            self.best_acc = new_acc
+            self.tasks[task_number][0] = new_acc
         return better
 
 
