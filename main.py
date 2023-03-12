@@ -61,6 +61,11 @@ def main(args):
     
     ##### Process dataset #####
     dset_path = args.dset_path
+    if not os.path.exists(dset_path):
+        # If path does not exist, then create a dataset on this path
+        dataset.create_dir(dset_path)
+        dataset.download_tinyImagenet(dset_path)
+        dataset.reorganize_files()
     num_tasks = args.num_tasks
     
     # Tracking best validation model
@@ -70,7 +75,7 @@ def main(args):
     # Per task dataset construction, training, validation, and testing.
     for task_number in range(len(task_info)):
         dataset_dict = prepare_loaders(dset_path, task_info, task_number, args)
-        EWC.per_task_updates(net, dataset_dict, tracker, writer, LOG, task_info, args, task_number)
+        EWC.per_task_updates(net, dataset_dict, writer, LOG, task_info, args, task_number)
 
     LOG.info("Done. Exiting")
 
@@ -81,7 +86,6 @@ def loss_fn(x, y):
 def prepare_loaders(dset_path, task_info, task_number, args):
     dset_train = os.path.join(dset_path, 'train')
     dset_test = os.path.join(dset_path, 'new_test')
-    
     train_dataset = dataset.tinyImageNet(root=dset_train, subset=task_info[task_number])
     test_dataset = dataset.tinyImageNet(root=dset_test, subset=task_info[task_number])
     dset_train_val = dataset.train_val_dataset(train_dataset)
@@ -112,13 +116,13 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_dir", default='./ckpt/',
                         help="Output directory where checkpoints are saved")
     
-    parser.add_argument("--dset_path", default='/root/yifei/CL_mod/src/dataset/tiny-imagenet-200/tiny-imagenet-200/',
+    parser.add_argument("--dset_path", default='/home/xingyifei/CL/dataset/tiny-imagenet-200',
                         help="Directory where data is stored")
 
     parser.add_argument("--lr", type=float, default=0.001,
                         help="Learning rate for the optimizer")
     
-    parser.add_argument("--num_epochs", type=float, default=20,
+    parser.add_argument("--num_epochs", type=float, default=1,
                         help="Learning rate for the optimizer")
     
     parser.add_argument("--num_tasks", type=int, default=10, help="Number of tasks to incrementally perform")

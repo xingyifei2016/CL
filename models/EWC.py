@@ -9,7 +9,7 @@ from torch import nn
 
 ### Code modified from https://github.com/Mattdl/CLsurvey
 
-def per_task_updates(net, dataset_dict, tracker, writer, LOG, task_info, args, task_number, use_cuda=torch.cuda.is_available(), head_shared = False, reg_lambda=1):
+def per_task_updates(net, dataset_dict, writer, LOG, task_info, args, task_number, use_cuda=torch.cuda.is_available(), head_shared = False, reg_lambda=1):
     
     # compute fisher if not first task
     if 'prev_train_dataset' in dataset_dict.keys():
@@ -35,13 +35,18 @@ def per_task_updates(net, dataset_dict, tracker, writer, LOG, task_info, args, t
     
     # get the number of features in this network and add a new task head
     if not head_shared:
-        num_ftrs = net.fc.in_features
-        new_fc = nn.Sequential(
-            net.fc,
-            nn.ReLU(),
-            nn.Linear(num_ftrs, len(dset_classes))
-        )
-        net.fc = new_fc
+        try:
+            num_ftrs = net.fc.out_features
+            new_fc = nn.Sequential(
+                net.fc,
+                nn.ReLU(),
+                nn.Linear(num_ftrs, len(dset_classes))
+            )
+            net.fc = new_fc
+        except:
+            last_layer_index = str(len(net.fc._modules) - 1)
+            num_ftrs = net.fc._modules[last_layer_index].in_features
+            net.fc._modules[last_layer_index] = nn.Linear(num_ftrs, len(dset_classes))
         print("NEW FC CLASSIFIER HEAD with {} units".format(len(dset_classes)))
 
     criterion = nn.CrossEntropyLoss()
@@ -54,48 +59,56 @@ def per_task_updates(net, dataset_dict, tracker, writer, LOG, task_info, args, t
 
     # train the model
     # this training functin passes the reg params to the optimizer to be used for penalizing changes on important params
-    model_ft, acc = train_model(net, criterion, optimizer, args.lr, dataset_dict, use_cuda, args.num_epochs)
+    model_ft, acc = train_model(net, criterion, optimizer, args.lr, dataset_dict, use_cuda,
+                                args.num_epochs, logger=LOG, writer=writer,
+                                exp_dir=os.path.join(args.checkpoint_dir, str(task_number)), task_number=task_number)
 
     return model_ft, 
     
 # def train_model()
 
 
-def train_model(model, criterion, optimizer, lr, dset_loaders, use_gpu, num_epochs, exp_dir='./',
+def train_model(model, criterion, optimizer, lr, dset_loaders, use_gpu, num_epochs, logger, writer, task_number, exp_dir='./',
                 resume='', saving_freq=5):
     """
     Trains a deep learning model with EWC penalty.
     Empirical Fisher is used instead of true FIM for efficiency and as there are no significant differences in results.
     :return: last model & best validation accuracy
     """
-
+    since = time.time()
     if os.path.isfile(resume):
-        print("=> loading checkpoint '{}'".format(resume))
+        logger.info("=> loading checkpoint '{}'".format(resume))
         checkpoint = torch.load(resume)
         start_epoch = checkpoint['epoch']
         best_acc = checkpoint['best_acc']
+        val_beat_counts = checkpoint['val_beat_counts']
         model.load_state_dict(checkpoint['state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer'])
         lr = checkpoint['lr']
-        print("lr is ", lr)
-        print("=> loaded checkpoint '{}' (epoch {})"
+        logger.info("lr is ", lr)
+        logger.info("=> loaded checkpoint '{}' (epoch {})"
               .format(resume, checkpoint['epoch']))
     else:
         start_epoch = 0
-        print("=> no checkpoint found at '{}'".format(resume))
+        logger.info("=> no checkpoint found at '{}'".format(resume))
+        val_beat_counts = 0
+        best_acc = 0
 
-    print(str(start_epoch))
-    print("lr is", lr)
+    logger.info(str(start_epoch))
+    logger.info("lr is "+str(lr))
+    if not os.path.exists(exp_dir):
+        os.mkdir(exp_dir)
+
     for epoch in range(start_epoch, num_epochs):
-        print('Epoch {}/{}'.format(epoch, num_epochs - 1))
-        print('-' * 10)
+        logger.info('Epoch {}/{}'.format(epoch, num_epochs - 1))
+        logger.info('-' * 10)
 
         # Each epoch has a training and validation phase
         for phase in ['train', 'val']:
             if phase == 'train':
                 optimizer, lr, continue_training = set_lr(optimizer, lr, count=val_beat_counts)
                 if not continue_training:
-                    print('Best val Acc: {:4f}'.format(best_acc))
+                    logger.info('Best val Acc: {:4f}'.format(best_acc))
                     return model, best_acc
                 model.train(True)  # Set model to training mode
             else:
@@ -136,19 +149,34 @@ def train_model(model, criterion, optimizer, lr, dset_loaders, use_gpu, num_epoc
                 running_loss += loss.data.item()
                 running_corrects += torch.sum(preds == labels.data).item()
 
-            epoch_loss = running_loss / dset_sizes[phase]
-            epoch_acc = running_corrects / dset_sizes[phase]
+            epoch_loss = running_loss / len(dset_loaders[phase].dataset)
+            epoch_acc = running_corrects / len(dset_loaders[phase].dataset)
 
-            print('{} Loss: {:.4f} Acc: {:.4f}'.format(
+            writer.add_scalar(str(task_number)+'_'+str(phase)+' Loss', epoch_loss, epoch)
+            writer.add_scalar(str(task_number)+'_'+str(phase)+' Acc', epoch_acc, epoch)
+
+            logger.info('{} Loss: {:.4f} Acc: {:.4f}'.format(
                 phase, epoch_loss, epoch_acc))
             if math.isnan(epoch_loss):
                 return model, best_acc
             # deep copy the model
             if phase == 'val':
                 if epoch_acc > best_acc:
+                    logger.info("FOUND NEW BEST VAL MODEL: "+str(epoch_acc)+" on epoch "+str(epoch))
                     del outputs, labels, inputs, loss, preds
                     best_acc = epoch_acc
-                    torch.save(model, os.path.join(exp_dir, 'best_model.pth.tar'))
+                    epoch_file_name = exp_dir + '/' + 'epoch' + '_best_model.pth.tar'
+                    save_checkpoint({
+                        'epoch': epoch + 1,
+                        'lr': lr,
+                        'val_beat_counts': val_beat_counts,
+                        'epoch_acc': epoch_acc,
+                        'best_acc': best_acc,
+                        'arch': 'alexnet',
+                        'model': model,
+                        'state_dict': model.state_dict(),
+                        'optimizer': optimizer.state_dict(),
+                    }, epoch_file_name)
                     val_beat_counts = 0
                 else:
                     val_beat_counts += 1
@@ -165,12 +193,11 @@ def train_model(model, criterion, optimizer, lr, dset_loaders, use_gpu, num_epoc
                 'state_dict': model.state_dict(),
                 'optimizer': optimizer.state_dict(),
             }, epoch_file_name)
-        print()
 
     time_elapsed = time.time() - since
-    print('Training complete in {:.0f}m {:.0f}s'.format(
+    logger.info('Training task complete in {:.0f}m {:.0f}s'.format(
         time_elapsed // 60, time_elapsed % 60))
-    print('Best val Acc: {:4f}'.format(best_acc))
+    logger.info('Best val Acc: {:4f}'.format(best_acc))
     return model, best_acc
 
 
@@ -317,6 +344,9 @@ def diag_fisher(model, dset_loader, data_len):
                 omega += p.grad.data ** 2 / data_len  # Each datasample only contributes 1/datalength to the total
                 reg_param['omega'] = omega
     return model
+
+def save_checkpoint(state, filename='checkpoint.pth.tar'):
+    torch.save(state, filename)
 
 
 # set omega to zero but after storing its value in a temp omega in which later we can accumolate them both
